@@ -22,6 +22,7 @@ NODES=(
     "https://github.com/smthemex/ComfyUI_DiffuEraser"
 	"https://github.com/ClownsharkBatwing/RES4LYF"
 	"https://github.com/giriss/comfy-image-saver"
+	"https://github.com/city96/ComfyUI-GGUF"
 )
 
 INPUT_IMAGES=(
