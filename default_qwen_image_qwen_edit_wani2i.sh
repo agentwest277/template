@@ -58,6 +58,7 @@ LORA_MODELS=(
 	"https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_I2V_14B_480p_cfg_step_distill_rank32_bf16.safetensors"
 	"https://huggingface.co/Aitrepreneur/FLX/resolve/main/Wan2.2-Lightning_I2V-A14B-4steps-lora_HIGH_fp16.safetensors"
 	"https://huggingface.co/Aitrepreneur/FLX/resolve/main/Wan2.2-Lightning_I2V-A14B-4steps-lora_LOW_fp16.safetensors"
+	"https://huggingface.co/Alex583940/qwen_girl/resolve/main/qwen_MCNL_v1.0.safetensors"
 )
 
 VAE_MODELS=(
