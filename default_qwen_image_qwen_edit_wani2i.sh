@@ -43,7 +43,7 @@ CHECKPOINT_MODELS=(
 )
 
 DIFFUSION_MODELS=(
-    "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_bf16.safetensors?download=true"
+    "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_bf16.safetensors"
 )
 
 UNET_MODELS=(
