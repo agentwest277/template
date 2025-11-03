@@ -34,16 +34,13 @@ APT_INSTALL='apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install
 AUTO_UPDATE="${AUTO_UPDATE:-true}"
 
 # ——————————————————————————————————————————————
-# Отсюда – твоя исходная конфигурация, но с путями на том
+# Конфигурация загрузок/пакетов
 # ——————————————————————————————————————————————
 
-# Пакеты APT (по желанию; оставь закомментированными или добавь нужные)
 APT_PACKAGES=(
-    # "package-1"
-    # "package-2"
+    # "git-lfs"
 )
 
-# Пакеты pip (ставятся в venv на том)
 PIP_PACKAGES=(
     "diffusers"
     "peft"
@@ -51,7 +48,6 @@ PIP_PACKAGES=(
     "transformers"
 )
 
-# Ноды ComfyUI (будут лежать в $COMFYUI_DIR/custom_nodes на томе)
 NODES=(
     "https://github.com/ltdrdata/ComfyUI-Manager"
     "https://github.com/smthemex/ComfyUI_DiffuEraser"
@@ -66,7 +62,6 @@ NODES=(
     "https://github.com/ltdrdata/ComfyUI-Impact-Pack"
 )
 
-# Опциональные загрузки
 INPUT_IMAGES=()
 TEXT_ENCODER_MODELS=()
 WORKFLOWS=()
@@ -84,17 +79,15 @@ VAE_MODELS=()
 ESRGAN_MODELS=()
 CONTROLNET_MODELS=()
 
-### ====== Ниже — логика провижининга (адаптирована под volume) ======
+### ====== Логика провижининга (адаптирована под volume и venv) ======
 
 function ensure_base_tools() {
-    # Ставим базовые тулзы, если их нет (git, wget, venv, pip)
     if command -v apt-get >/dev/null 2>&1; then
         missing=()
         command -v git     >/dev/null 2>&1 || missing+=("git")
         command -v wget    >/dev/null 2>&1 || missing+=("wget")
         command -v python3 >/dev/null 2>&1 || missing+=("python3")
         command -v pip3    >/dev/null 2>&1 || missing+=("python3-pip")
-        # venv обычно в python3-venv
         python3 -m venv --help >/dev/null 2>&1 || missing+=("python3-venv")
         if (( ${#missing[@]} > 0 )); then
             eval "$APT_INSTALL ${missing[*]}"
@@ -109,12 +102,23 @@ function ensure_venv() {
         mkdir -p "$(dirname "$VENV_DIR")"
         "$PYTHON_BIN" -m venv "$VENV_DIR"
     fi
-    # Активируем venv
+
+    # Создаём симлинк /venv/main -> $VENV_DIR (для совместимости с чужими стартерами)
+    mkdir -p /venv || true
+    ln -sfn "$VENV_DIR" /venv/main
+
+    # Абсолютные интерпретатор/пип из venv
+    export PY="$VENV_DIR/bin/python"
+    export PIP="$VENV_DIR/bin/pip"
+
+    # Активируем venv и обновляем pip
     # shellcheck disable=SC1091
     source "$VENV_DIR/bin/activate"
-    python -m pip install --upgrade pip
-    # Настроим кэш pip на том
-    pip config set global.cache-dir "$PIP_CACHE_DIR" >/dev/null 2>&1 || true
+    "$PY" -m pip install --upgrade pip
+    "$PIP" config set global.cache-dir "$PIP_CACHE_DIR" >/dev/null 2>&1 || true
+
+    # Приоритет venv в PATH
+    export PATH="$VENV_DIR/bin:$PATH"
 }
 
 function provisioning_start() {
@@ -165,7 +169,7 @@ function provisioning_get_workflows() {
 
 function provisioning_get_pip_packages() {
     if [[ ${#PIP_PACKAGES[@]} -gt 0 ]]; then
-        pip install --no-cache-dir "${PIP_PACKAGES[@]}"
+        "$PIP" install --no-cache-dir "${PIP_PACKAGES[@]}"
     fi
 }
 
@@ -180,14 +184,14 @@ function provisioning_get_nodes() {
                 printf "Updating node: %s...\n" "${repo}"
                 ( cd "$path" && git pull )
                 if [[ -e $requirements ]]; then
-                    pip install --no-cache-dir -r "$requirements"
+                    "$PIP" install --no-cache-dir -r "$requirements"
                 fi
             fi
         else
             printf "Cloning node: %s...\n" "${repo}"
             git clone "${repo}" "${path}" --recursive
             if [[ -e $requirements ]]; then
-                pip install --no-cache-dir -r "$requirements"
+                "$PIP" install --no-cache-dir -r "$requirements"
             fi
         fi
     done
