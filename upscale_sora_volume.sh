@@ -200,6 +200,7 @@ function provisioning_get_nodes() {
       pip_requirements_minimal "$comfy_sam2_dir/requirements.txt"
     fi
   fi
+}
 
 function provisioning_get_files() {
   # $1 = target dir, остальные — URL
