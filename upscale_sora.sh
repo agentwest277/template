@@ -24,7 +24,6 @@ NODES=(
     "https://github.com/kijai/ComfyUI-KJNodes"
     "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
     "https://github.com/lihaoyun6/ComfyUI-FlashVSR_Ultra_Fast"
-    "https://github.com/smthemex/ComfyUI_DiffuEraser"
     "https://github.com/facebookresearch/sam2"
     "https://github.com/ltdrdata/was-node-suite-comfyui"
     "https://github.com/rgthree/rgthree-comfy"
