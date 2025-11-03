@@ -132,7 +132,7 @@ function ensure_base_tools() {
 function provisioning_get_pip_packages() {
   "$PY" -m pip install --upgrade pip || true
 
-  # БАЗОВОЕ (мягко). Эти пакеты часто требуются многим нодам:
+  # базовые
   pip_install_if_missing \
     "diffusers" \
     "accelerate" \
@@ -141,13 +141,17 @@ function provisioning_get_pip_packages() {
     "matplotlib" \
     "imageio" \
     "imageio_ffmpeg:imageio-ffmpeg" \
-    "cv2:opencv-python-headless" \
     "scipy" \
     "skimage:scikit-image" \
     "piexif" \
     "blend_modes" \
     "moviepy" \
-    "soundfile"
+    "soundfile" \
+    "segment_anything:segment-anything"
+
+  # OpenCV: гарантируем contrib-вариант (для cv2.ximgproc/guidedFilter)
+  "$PIP" uninstall -y opencv-python opencv-python-headless >/dev/null 2>&1 || true
+  pip_install_if_missing "cv2:opencv-contrib-python-headless"
 }
 
 function provisioning_get_nodes() {
@@ -172,19 +176,30 @@ function provisioning_get_nodes() {
     [[ -f "$requirements" ]] && pip_requirements_minimal "$requirements" || true
   done
 
-  # SAM2: если в custom_nodes есть папка sam2 без __init__.py — это НЕ Comfy-нода.
-  # Мы просто предупреждаем, чтобы не падало при импорте.
-  if [[ -d "${COMFYUI_DIR}/custom_nodes/sam2" && ! -f "${COMFYUI_DIR}/custom_nodes/sam2/__init__.py" ]]; then
-    echo "[INFO] Detected custom_nodes/sam2 without __init__.py (not a Comfy node). Skipping import."
-    echo "       If нужен SAM2 как нода — используйте порт: https://github.com/continue-revolution/ComfyUI-SAM2"
-    # Пример автодобавления (раскомментируй, если хочешь автоматически тянуть порт):
-    # if [[ ! -d "${COMFYUI_DIR}/custom_nodes/ComfyUI-SAM2/.git" ]]; then
-    #   git clone --recursive https://github.com/continue-revolution/ComfyUI-SAM2 "${COMFYUI_DIR}/custom_nodes/ComfyUI-SAM2" || true
-    #   [[ -f "${COMFYUI_DIR}/custom_nodes/ComfyUI-SAM2/requirements.txt" ]] && \
-    #     pip_requirements_minimal "${COMFYUI_DIR}/custom_nodes/ComfyUI-SAM2/requirements.txt"
-    # fi
+  # SAM2: корректная установка ComfyUI-SAM2
+  local sam2_dir="${COMFYUI_DIR}/custom_nodes/sam2"
+  local comfy_sam2_dir="${COMFYUI_DIR}/custom_nodes/ComfyUI-SAM2"
+
+  # если есть "битая" папка sam2 без __init__.py — удаляем
+  if [[ -d "$sam2_dir" && ! -f "$sam2_dir/__init__.py" ]]; then
+    echo "[INFO] Removing invalid custom_nodes/sam2 (not a valid Comfy node)."
+    rm -rf "$sam2_dir"
   fi
-}
+
+  # если ComfyUI-SAM2 нет — клонируем; если есть — обновляем
+  if [[ ! -d "$comfy_sam2_dir/.git" ]]; then
+    echo "[INFO] Installing ComfyUI-SAM2 node..."
+    git clone --recursive https://github.com/continue-revolution/ComfyUI-SAM2 "$comfy_sam2_dir" || true
+    if [[ -f "$comfy_sam2_dir/requirements.txt" ]]; then
+      pip_requirements_minimal "$comfy_sam2_dir/requirements.txt"
+    fi
+  else
+    echo "[INFO] Updating ComfyUI-SAM2 node..."
+    ( cd "$comfy_sam2_dir" && git pull --ff-only || true )
+    if [[ -f "$comfy_sam2_dir/requirements.txt" ]]; then
+      pip_requirements_minimal "$comfy_sam2_dir/requirements.txt"
+    fi
+  fi
 
 function provisioning_get_files() {
   # $1 = target dir, остальные — URL
