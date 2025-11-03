@@ -49,17 +49,8 @@ ln -sfn "$COMFYUI_DIR" "$HOME/ComfyUI" 2>/dev/null || true
 # ---- Настройки установки ----
 AUTO_UPDATE="${AUTO_UPDATE:-true}"
 
-APT_PACKAGES=( )   # оставлено для совместимости (используем умную установку ниже)
-
-PIP_PACKAGES=(     # базовые — будем ставить только при отсутствии импортов
-  diffusers
-  peft
-  accelerate
-  transformers
-)
-
-NODES=( )          # можно заполнить при необходимости
-
+# Заполняй по желанию:
+NODES=( )
 INPUT_IMAGES=()
 TEXT_ENCODER_MODELS=()
 WORKFLOWS=()
@@ -76,12 +67,15 @@ CONTROLNET_MODELS=()
 apt_install_if_missing() {
   command -v apt-get >/dev/null 2>&1 || { echo "apt-get недоступен"; return 0; }
   local need_sudo=""; command -v sudo >/dev/null 2>&1 && need_sudo="sudo"
-  # аргументы — пары "cmd:pkg"
   local need_update=0
+  # аргументы — пары "cmd:pkg"
   for pair in "$@"; do
     local check="${pair%%:*}" pkg="${pair##*:}"
     if ! command -v "$check" >/dev/null 2>&1; then
-      ((need_update==0)) && { $need_sudo apt-get update -y; need_update=1; }
+      if [[ $need_update -eq 0 ]]; then
+        $need_sudo apt-get update -y
+        need_update=1
+      fi
       DEBIAN_FRONTEND=noninteractive $need_sudo apt-get install -y "$pkg"
     fi
   done
@@ -91,12 +85,13 @@ pip_install_if_missing() {
   # аргументы — пары "import_name[:pip_pkg]"
   for pair in "$@"; do
     local imp="${pair%%:*}"
-    local pkg="${pair##*:}"
-    [[ "$pkg" == "$imp" ]] || [[ "$pair" != *:* ]] && pkg="${pkg:-$imp}"
-    "$PY' - <<PYCODE >/dev/null 2>&1 || "$PIP" install --no-cache-dir "$pkg" || true
+    local pkg="${pair#*:}"
+    [[ "$pair" == "$imp" ]] && pkg="$imp"
+    "$PY" - <<'PYCODE' "$imp" >/dev/null 2>&1 || "$PIP" install --no-cache-dir "$pkg" || true
 import importlib, sys
+mod = sys.argv[1]
 try:
-    importlib.import_module("$imp")
+    importlib.import_module(mod)
 except Exception:
     sys.exit(1)
 PYCODE
@@ -131,13 +126,12 @@ function ensure_base_tools() {
 function provisioning_get_pip_packages() {
   "$PY" -m pip install --upgrade pip || true
 
-  # базовые из вашего списка — только если реально нужны
-  for pkg in "${PIP_PACKAGES[@]}"; do
-    pip_install_if_missing "$pkg"
-  done
-
-  # добивки по типичным ошибкам нод (ставим только если импорт не проходит)
+  # БАЗОВОЕ (мягко). Эти пакеты часто требуются многим нодам:
   pip_install_if_missing \
+    "diffusers" \
+    "accelerate" \
+    "peft" \
+    "transformers" \
     "matplotlib" \
     "imageio" \
     "imageio_ffmpeg:imageio-ffmpeg" \
@@ -171,6 +165,19 @@ function provisioning_get_nodes() {
 
     [[ -f "$requirements" ]] && pip_requirements_minimal "$requirements" || true
   done
+
+  # SAM2: если в custom_nodes есть папка sam2 без __init__.py — это НЕ Comfy-нода.
+  # Мы просто предупреждаем, чтобы не падало при импорте.
+  if [[ -d "${COMFYUI_DIR}/custom_nodes/sam2" && ! -f "${COMFYUI_DIR}/custom_nodes/sam2/__init__.py" ]]; then
+    echo "[INFO] Detected custom_nodes/sam2 without __init__.py (not a Comfy node). Skipping import."
+    echo "       If нужен SAM2 как нода — используйте порт: https://github.com/continue-revolution/ComfyUI-SAM2"
+    # Пример автодобавления (раскомментируй, если хочешь автоматически тянуть порт):
+    # if [[ ! -d "${COMFYUI_DIR}/custom_nodes/ComfyUI-SAM2/.git" ]]; then
+    #   git clone --recursive https://github.com/continue-revolution/ComfyUI-SAM2 "${COMFYUI_DIR}/custom_nodes/ComfyUI-SAM2" || true
+    #   [[ -f "${COMFYUI_DIR}/custom_nodes/ComfyUI-SAM2/requirements.txt" ]] && \
+    #     pip_requirements_minimal "${COMFYUI_DIR}/custom_nodes/ComfyUI-SAM2/requirements.txt"
+    # fi
+  fi
 }
 
 function provisioning_get_files() {
