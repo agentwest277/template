@@ -61,17 +61,7 @@ PIP_PACKAGES=(
 )
 
 NODES=(
-  "https://github.com/ltdrdata/ComfyUI-Manager"
-  "https://github.com/smthemex/ComfyUI_DiffuEraser"
-  "https://github.com/yolain/ComfyUI-Easy-Use"
-  "https://github.com/kijai/ComfyUI-KJNodes"
-  "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
-  "https://github.com/lihaoyun6/ComfyUI-FlashVSR_Ultra_Fast"
-  "https://github.com/facebookresearch/sam2"
-  "https://github.com/ltdrdata/was-node-suite-comfyui"
-  "https://github.com/rgthree/rgthree-comfy"
-  "https://github.com/chflame163/ComfyUI_LayerStyle"
-  "https://github.com/ltdrdata/ComfyUI-Impact-Pack"
+
 )
 
 INPUT_IMAGES=()
@@ -81,14 +71,14 @@ TEXT_ENCODER_MODELS=()
 WORKFLOWS=()
 
 CHECKPOINT_MODELS=(
-  "https://huggingface.co/alexgenovese/checkpoint/resolve/5d96d799d7e943878a2c7614674eb48435891d00/realisticVisionV60B1_v60B1VAE.safetensors"
+
 )
 
 DIFFUSION_MODELS=()
 UNET_MODELS=()
 
 LORA_MODELS=(
-  "https://huggingface.co/wangfuyun/PCM_Weights/resolve/main/sd15/pcm_sd15_smallcfg_2step_converted.safetensors"
+
 )
 
 VAE_MODELS=()
