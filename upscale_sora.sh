@@ -1,7 +1,7 @@
 #!/bin/bash
 
 source /venv/main/bin/activate
-COMFYUI_DIR=${WORKSPACE}/ComfyUI
+COMFYUI_DIR=${DATA}/ComfyUI
 
 # Packages are installed after nodes so we can fix them...
 
