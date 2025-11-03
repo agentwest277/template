@@ -7,9 +7,9 @@ set -euo pipefail
 ##############################################
 
 # ---- Базовые пути/переменные ----
-DATA="${DATA:-/data}"
+DATA="${DATA:-/data}"                        # точка монтирования volume на Vast
 WORKSPACE="${WORKSPACE:-/workspace}"
-COMFYUI_DIR="${COMFYUI_DIR:-$DATA/ComfyUI}"
+COMFYUI_DIR="${COMFYUI_DIR:-$DATA/ComfyUI}"  # корень ComfyUI на томе
 
 # venv: используем существующий /venv/main, иначе создаём на томе
 VENV_DIR="${VENV_DIR:-/venv/main}"
@@ -18,12 +18,13 @@ if [[ ! -d "$VENV_DIR" ]]; then
   mkdir -p "$(dirname "$VENV_DIR")"
   python3 -m venv "$VENV_DIR"
 fi
+# shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
 
 PY="$VENV_DIR/bin/python"
 PIP="$VENV_DIR/bin/pip"
 
-# Кэши на томе
+# Кэши на томе, чтобы всё тяжёлое копилось в /data
 export HF_HOME="$DATA/.cache/huggingface"
 export TRANSFORMERS_CACHE="$HF_HOME/transformers"
 export DIFFUSERS_CACHE="$HF_HOME/diffusers"
@@ -41,14 +42,14 @@ if [[ -d "$WORKSPACE/ComfyUI" && ! -L "$WORKSPACE/ComfyUI" ]]; then
   rm -rf "$WORKSPACE/ComfyUI"
 fi
 
-# Симлинки для совместимости
+# Симлинки для совместимости со скриптами/образами
 ln -sfn "$COMFYUI_DIR" "$WORKSPACE/ComfyUI"
 ln -sfn "$COMFYUI_DIR" "$HOME/ComfyUI" 2>/dev/null || true
 
 # ---- Настройки установки ----
 AUTO_UPDATE="${AUTO_UPDATE:-true}"
 
-# Заполняй по желанию:
+# Заполняй по желанию (модели не скачаются повторно, если уже лежат на volume):
 NODES=()
 INPUT_IMAGES=()
 TEXT_ENCODER_MODELS=()
@@ -68,7 +69,7 @@ apt_install_if_missing() {
   local need_sudo=""
   command -v sudo >/dev/null 2>&1 && need_sudo="sudo"
   local need_update=0
-  
+  # аргументы — пары "cmd:pkg"
   for pair in "$@"; do
     local check="${pair%%:*}"
     local pkg="${pair##*:}"
@@ -82,6 +83,7 @@ apt_install_if_missing() {
   done
 }
 
+# аргументы — строки "import_name[:pip_pkg]"
 pip_install_if_missing() {
   for pair in "$@"; do
     local imp="${pair%%:*}"
@@ -130,7 +132,7 @@ ensure_base_tools() {
 provisioning_get_pip_packages() {
   "$PY" -m pip install --upgrade pip || true
 
-  # Библиотеки, на которые ругались ноды
+  # Библиотеки, на которые ругались ноды (DiffuEraser, LayerStyle, Impact-Pack, VHS)
   pip_install_if_missing \
     "diffusers" \
     "accelerate" \
@@ -145,9 +147,9 @@ provisioning_get_pip_packages() {
     "blend_modes" \
     "moviepy" \
     "soundfile" \
-    "segment_anything"
+    "segment_anything:segment-anything"
 
-  # OpenCV contrib
+  # OpenCV contrib — нужен guidedFilter (cv2.ximgproc) для LayerStyle
   "$PIP" uninstall -y opencv-python opencv-python-headless >/dev/null 2>&1 || true
   pip_install_if_missing "cv2:opencv-contrib-python-headless"
 
@@ -184,7 +186,7 @@ provisioning_get_nodes() {
     [[ -f "$requirements" ]] && pip_requirements_minimal "$requirements" || true
   done
 
-  # SAM2: чистим пустую папку
+  # SAM2: правильная нода — ComfyUI-SAM2. Чужая папка sam2 без __init__.py ломает импорт.
   local sam2_dir="${COMFYUI_DIR}/custom_nodes/sam2"
   local comfy_sam2_dir="${COMFYUI_DIR}/custom_nodes/ComfyUI-SAM2"
 
@@ -205,6 +207,7 @@ provisioning_get_nodes() {
 }
 
 provisioning_get_files() {
+  # $1 = target dir, остальные — URL
   if [[ $# -lt 2 ]]; then return 0; fi
   local dir="$1"
   shift
@@ -246,7 +249,7 @@ provisioning_has_valid_civitai_token() {
   [[ "$code" == "200" ]]
 }
 
-# Основная функция скачивания
+# Скачать из $1(URL) в каталог $2
 provisioning_download() {
   local url="$1"
   local outdir="$2"
@@ -255,4 +258,40 @@ provisioning_download() {
 
   if [[ -n "${HF_TOKEN:-}" && $url =~ ^https://([a-zA-Z0-9_-]+\.)?huggingface\.co(/|$|\?) ]]; then
     auth_token="$HF_TOKEN"
-  elif [[ -n "${CIVITAI_TOKEN:-}" && $url =~ ^https://([a-zA-Z0-9_-]+
+  elif [[ -n "${CIVITAI_TOKEN:-}" && $url =~ ^https://([a-zA-Z0-9_-]+\.)?civitai\.com(/|$|\?) ]]; then
+    auth_token="$CIVITAI_TOKEN"
+  fi
+
+  if [[ -n "$auth_token" ]]; then
+    wget --header="Authorization: Bearer $auth_token" \
+         -qnc --content-disposition --show-progress -e dotbytes="$dots" -P "$outdir" "$url"
+  else
+    wget -qnc --content-disposition --show-progress -e dotbytes="$dots" -P "$outdir" "$url"
+  fi
+}
+
+provisioning_start() {
+  provisioning_print_header
+  ensure_base_tools
+  provisioning_get_pip_packages
+  provisioning_get_nodes
+
+  provisioning_get_files "${COMFYUI_DIR}/models/checkpoints"      "${CHECKPOINT_MODELS[@]}"
+  provisioning_get_files "${COMFYUI_DIR}/models/unet"             "${UNET_MODELS[@]}"
+  provisioning_get_files "${COMFYUI_DIR}/models/diffusion_models" "${DIFFUSION_MODELS[@]}"
+  provisioning_get_files "${COMFYUI_DIR}/models/loras"            "${LORA_MODELS[@]}"
+  provisioning_get_files "${COMFYUI_DIR}/models/controlnet"       "${CONTROLNET_MODELS[@]}"
+  provisioning_get_files "${COMFYUI_DIR}/models/vae"              "${VAE_MODELS[@]}"
+  provisioning_get_files "${COMFYUI_DIR}/models/text_encoders"    "${TEXT_ENCODER_MODELS[@]}"
+  provisioning_get_files "${COMFYUI_DIR}/models/esrgan"           "${ESRGAN_MODELS[@]}"
+
+  provisioning_get_workflows "${COMFYUI_DIR}/input/workflows"     "${WORKFLOWS[@]}"
+  provisioning_get_files     "${COMFYUI_DIR}/input"               "${INPUT_IMAGES[@]}"
+
+  provisioning_print_end
+}
+
+# Позволяем отключить провижининг созданием файла /.noprovisioning
+if [[ ! -f /.noprovisioning ]]; then
+  provisioning_start
+fi
