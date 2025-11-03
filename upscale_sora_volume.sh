@@ -30,7 +30,8 @@ export TRANSFORMERS_CACHE="$HF_HOME/transformers"
 export DIFFUSERS_CACHE="$HF_HOME/diffusers"
 export PIP_CACHE_DIR="$DATA/.cache/pip"
 export XDG_CACHE_HOME="$DATA/.cache"
-mkdir -p "$HF_HOME" "$TRANSFORMERS_CACHE" "$DIFFUSERS_CACHE" "$PIP_CACHE_DIR" "$XDG_CACHE_HOME"
+export MPLCONFIGDIR="$DATA/.cache/matplotlib"
+mkdir -p "$HF_HOME" "$TRANSFORMERS_CACHE" "$DIFFUSERS_CACHE" "$PIP_CACHE_DIR" "$XDG_CACHE_HOME" "$MPLCONFIGDIR"
 
 # Готовим каталоги
 mkdir -p "$COMFYUI_DIR"/{models,custom_nodes,input,output} "$WORKSPACE"
@@ -46,46 +47,69 @@ ln -sfn "$COMFYUI_DIR" "$WORKSPACE/ComfyUI"
 ln -sfn "$COMFYUI_DIR" "$HOME/ComfyUI" 2>/dev/null || true
 
 # ---- Настройки установки ----
-
 AUTO_UPDATE="${AUTO_UPDATE:-true}"
 
-APT_PACKAGES=(
-  # добавьте при необходимости, напр. "git-lfs"
+APT_PACKAGES=( )   # оставлено для совместимости (используем умную установку ниже)
+
+PIP_PACKAGES=(     # базовые — будем ставить только при отсутствии импортов
+  diffusers
+  peft
+  accelerate
+  transformers
 )
 
-PIP_PACKAGES=(
-  "diffusers"
-  "peft"
-  "accelerate"
-  "transformers"
-)
-
-NODES=(
-
-)
+NODES=( )          # можно заполнить при необходимости
 
 INPUT_IMAGES=()
-
 TEXT_ENCODER_MODELS=()
-
 WORKFLOWS=()
-
-CHECKPOINT_MODELS=(
-
-)
-
+CHECKPOINT_MODELS=( )
 DIFFUSION_MODELS=()
 UNET_MODELS=()
-
-LORA_MODELS=(
-
-)
-
+LORA_MODELS=( )
 VAE_MODELS=()
 ESRGAN_MODELS=()
 CONTROLNET_MODELS=()
 
-# ---- Функции ----
+# ── ХЕЛПЕРЫ: ставим только отсутствующее ──────────────────────────────────────
+
+apt_install_if_missing() {
+  command -v apt-get >/dev/null 2>&1 || { echo "apt-get недоступен"; return 0; }
+  local need_sudo=""; command -v sudo >/dev/null 2>&1 && need_sudo="sudo"
+  # аргументы — пары "cmd:pkg"
+  local need_update=0
+  for pair in "$@"; do
+    local check="${pair%%:*}" pkg="${pair##*:}"
+    if ! command -v "$check" >/dev/null 2>&1; then
+      ((need_update==0)) && { $need_sudo apt-get update -y; need_update=1; }
+      DEBIAN_FRONTEND=noninteractive $need_sudo apt-get install -y "$pkg"
+    fi
+  done
+}
+
+pip_install_if_missing() {
+  # аргументы — пары "import_name[:pip_pkg]"
+  for pair in "$@"; do
+    local imp="${pair%%:*}"
+    local pkg="${pair##*:}"
+    [[ "$pkg" == "$imp" ]] || [[ "$pair" != *:* ]] && pkg="${pkg:-$imp}"
+    "$PY' - <<PYCODE >/dev/null 2>&1 || "$PIP" install --no-cache-dir "$pkg" || true
+import importlib, sys
+try:
+    importlib.import_module("$imp")
+except Exception:
+    sys.exit(1)
+PYCODE
+  done
+}
+
+pip_requirements_minimal() {
+  local reqfile="$1"
+  [[ -f "$reqfile" ]] || return 0
+  "$PIP" install --no-cache-dir -r "$reqfile" || true
+}
+
+# ── ЛОГИКА УСТАНОВКИ ──────────────────────────────────────────────────────────
 
 function provisioning_print_header() {
   printf "\n##############################################\n#          Provisioning container            #\n##############################################\n\n"
@@ -96,34 +120,34 @@ function provisioning_print_end() {
 }
 
 function ensure_base_tools() {
-  local need_sudo=""
-  if command -v sudo >/dev/null 2>&1; then need_sudo="sudo"; fi
-
-  if command -v apt-get >/dev/null 2>&1; then
-    # проверим стандартные утилиты
-    local missing=()
-    command -v git     >/dev/null 2>&1 || missing+=("git")
-    command -v wget    >/dev/null 2>&1 || missing+=("wget")
-    command -v python3 >/dev/null 2>&1 || missing+=("python3")
-    command -v rsync   >/dev/null 2>&1 || missing+=("rsync")
-    if (( ${#missing[@]} > 0 )); then
-      $need_sudo apt-get update -y
-      DEBIAN_FRONTEND=noninteractive $need_sudo apt-get install -y "${missing[@]}"
-    fi
-    if (( ${#APT_PACKAGES[@]} > 0 )); then
-      $need_sudo apt-get update -y
-      DEBIAN_FRONTEND=noninteractive $need_sudo apt-get install -y "${APT_PACKAGES[@]}"
-    fi
-  else
-    echo "apt-get недоступен — пропускаю установку APT пакетов."
-  fi
+  # базовые утилиты (только если отсутствуют)
+  apt_install_if_missing \
+    "git:git" \
+    "wget:wget" \
+    "rsync:rsync" \
+    "ffmpeg:ffmpeg"
 }
 
 function provisioning_get_pip_packages() {
-  if (( ${#PIP_PACKAGES[@]} > 0 )); then
-    "$PY" -m pip install --upgrade pip
-    "$PIP" install --no-cache-dir "${PIP_PACKAGES[@]}"
-  fi
+  "$PY" -m pip install --upgrade pip || true
+
+  # базовые из вашего списка — только если реально нужны
+  for pkg in "${PIP_PACKAGES[@]}"; do
+    pip_install_if_missing "$pkg"
+  done
+
+  # добивки по типичным ошибкам нод (ставим только если импорт не проходит)
+  pip_install_if_missing \
+    "matplotlib" \
+    "imageio" \
+    "imageio_ffmpeg:imageio-ffmpeg" \
+    "cv2:opencv-python-headless" \
+    "scipy" \
+    "skimage:scikit-image" \
+    "piexif" \
+    "blend_modes" \
+    "moviepy" \
+    "soundfile"
 }
 
 function provisioning_get_nodes() {
@@ -133,17 +157,19 @@ function provisioning_get_nodes() {
     local path="${COMFYUI_DIR}/custom_nodes/${dir}"
     local requirements="${path}/requirements.txt"
 
-    if [[ -d $path ]]; then
+    if [[ -d "$path/.git" ]]; then
       if [[ ${AUTO_UPDATE,,} != "false" ]]; then
         printf "Updating node: %s...\n" "$repo"
         ( cd "$path" && git pull --ff-only || true )
-        [[ -f "$requirements" ]] && "$PIP" install --no-cache-dir -r "$requirements" || true
+      else
+        printf "Node exists (skip update): %s\n" "$repo"
       fi
     else
       printf "Cloning node: %s...\n" "$repo"
       git clone --recursive "$repo" "$path" || true
-      [[ -f "$requirements" ]] && "$PIP" install --no-cache-dir -r "$requirements" || true
     fi
+
+    [[ -f "$requirements" ]] && pip_requirements_minimal "$requirements" || true
   done
 }
 
