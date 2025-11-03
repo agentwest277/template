@@ -81,13 +81,19 @@ apt_install_if_missing() {
   done
 }
 
+# ВНИМАНИЕ: здесь и была ошибка; ниже — рабочая версия без лишних кавычек/скобок
 pip_install_if_missing() {
   # аргументы — пары "import_name[:pip_pkg]"
   for pair in "$@"; do
     local imp="${pair%%:*}"
-    local pkg="${pair#*:}"
-    [[ "$pair" == "$imp" ]] && pkg="$imp"
-    "$PY" - <<'PYCODE' "$imp" >/dev/null 2>&1 || "$PIP" install --no-cache-dir "$pkg" || true
+    local pkg
+    if [[ "$pair" == "$imp" ]]; then
+      pkg="$imp"
+    else
+      pkg="${pair#*:}"
+    fi
+    # Проверяем импорт в текущем venv; если не ок — ставим пакет
+    "$PY" - "$imp" >/dev/null 2>&1 <<'PYCODE' || "$PIP" install --no-cache-dir "$pkg" || true
 import importlib, sys
 mod = sys.argv[1]
 try:
