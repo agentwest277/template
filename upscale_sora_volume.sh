@@ -49,7 +49,7 @@ ln -sfn "$COMFYUI_DIR" "$HOME/ComfyUI" 2>/dev/null || true
 # ---- Настройки установки ----
 AUTO_UPDATE="${AUTO_UPDATE:-true}"
 
-# Заполняй по желанию:
+# Заполняй по желанию (пути/модели не скачиваются повторно, т.к. уже на volume):
 NODES=( )
 INPUT_IMAGES=()
 TEXT_ENCODER_MODELS=()
@@ -81,9 +81,8 @@ apt_install_if_missing() {
   done
 }
 
-# ВНИМАНИЕ: здесь и была ошибка; ниже — рабочая версия без лишних кавычек/скобок
+# аргументы — строки в формате "import_name[:pip_pkg]"
 pip_install_if_missing() {
-  # аргументы — пары "import_name[:pip_pkg]"
   for pair in "$@"; do
     local imp="${pair%%:*}"
     local pkg
@@ -99,7 +98,7 @@ mod = sys.argv[1]
 try:
     importlib.import_module(mod)
 except Exception:
-    sys.exit(1)
+    raise SystemExit(1)
 PYCODE
   done
 }
@@ -132,7 +131,7 @@ function ensure_base_tools() {
 function provisioning_get_pip_packages() {
   "$PY" -m pip install --upgrade pip || true
 
-  # базовые
+  # базовые python-зависимости для твоих нод
   pip_install_if_missing \
     "diffusers" \
     "accelerate" \
@@ -152,6 +151,17 @@ function provisioning_get_pip_packages() {
   # OpenCV: гарантируем contrib-вариант (для cv2.ximgproc/guidedFilter)
   "$PIP" uninstall -y opencv-python opencv-python-headless >/dev/null 2>&1 || true
   pip_install_if_missing "cv2:opencv-contrib-python-headless"
+
+  # 🔧 прогрев импорта — убирает «Module ... load failed» в рантайме
+  "$PY" - <<'PY'
+import importlib
+mods = ("diffusers","imageio","imageio_ffmpeg","scipy","skimage","piexif","blend_modes","segment_anything","cv2")
+for m in mods:
+    try:
+        importlib.import_module(m)
+    except Exception as e:
+        print(f"[WARN] import {m} failed: {e}")
+PY
 }
 
 function provisioning_get_nodes() {
@@ -176,11 +186,11 @@ function provisioning_get_nodes() {
     [[ -f "$requirements" ]] && pip_requirements_minimal "$requirements" || true
   done
 
-  # SAM2: корректная установка ComfyUI-SAM2
+  # SAM2: корректная установка ComfyUI-SAM2 (а не папки repo 'sam2' без __init__.py)
   local sam2_dir="${COMFYUI_DIR}/custom_nodes/sam2"
   local comfy_sam2_dir="${COMFYUI_DIR}/custom_nodes/ComfyUI-SAM2"
 
-  # если есть "битая" папка sam2 без __init__.py — удаляем
+  # если есть "битая" папка sam2 без __init__.py — удаляем, чтобы не падал импорт
   if [[ -d "$sam2_dir" && ! -f "$sam2_dir/__init__.py" ]]; then
     echo "[INFO] Removing invalid custom_nodes/sam2 (not a valid Comfy node)."
     rm -rf "$sam2_dir"
@@ -190,15 +200,11 @@ function provisioning_get_nodes() {
   if [[ ! -d "$comfy_sam2_dir/.git" ]]; then
     echo "[INFO] Installing ComfyUI-SAM2 node..."
     git clone --recursive https://github.com/continue-revolution/ComfyUI-SAM2 "$comfy_sam2_dir" || true
-    if [[ -f "$comfy_sam2_dir/requirements.txt" ]]; then
-      pip_requirements_minimal "$comfy_sam2_dir/requirements.txt"
-    fi
+    [[ -f "$comfy_sam2_dir/requirements.txt" ]] && pip_requirements_minimal "$comfy_sam2_dir/requirements.txt"
   else
     echo "[INFO] Updating ComfyUI-SAM2 node..."
     ( cd "$comfy_sam2_dir" && git pull --ff-only || true )
-    if [[ -f "$comfy_sam2_dir/requirements.txt" ]]; then
-      pip_requirements_minimal "$comfy_sam2_dir/requirements.txt"
-    fi
+    [[ -f "$comfy_sam2_dir/requirements.txt" ]] && pip_requirements_minimal "$comfy_sam2_dir/requirements.txt"
   fi
 }
 
@@ -282,7 +288,7 @@ function provisioning_start() {
   provisioning_get_workflows "${COMFYUI_DIR}/input/workflows"     "${WORKFLOWS[@]}"
   provisioning_get_files     "${COMFYUI_DIR}/input"               "${INPUT_IMAGES[@]}"
 
-  provisioning_print_end
+  provisioning_print_end()
 }
 
 # Позволяем отключить провижининг созданием файла /.noprovisioning
