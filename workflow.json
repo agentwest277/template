@@ -1,0 +1,356 @@
+{
+  "205": {
+    "inputs": {
+      "video": "00000000-985c-7285-96fd-d1a740399152_raw.mp4",
+      "force_rate": 0,
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": 0,
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "AnimateDiff"
+    },
+    "class_type": "VHS_LoadVideo",
+    "_meta": {
+      "title": "Load Video (Upload) 🎥🅥🅗🅢"
+    }
+  },
+  "209": {
+    "inputs": {
+      "frame_rate": [
+        "278",
+        0
+      ],
+      "loop_count": 0,
+      "filename_prefix": "AnimateDiff",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "283",
+        0
+      ],
+      "audio": [
+        "205",
+        2
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "242": {
+    "inputs": {
+      "image": "ComfyUI_temp_ssqyv_00002_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "245": {
+    "inputs": {
+      "frame_rate": [
+        "278",
+        0
+      ],
+      "loop_count": 0,
+      "filename_prefix": "AnimateDiff",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": false,
+      "images": [
+        "285",
+        0
+      ],
+      "audio": [
+        "205",
+        2
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "271": {
+    "inputs": {
+      "frame_rate": 30,
+      "loop_count": 0,
+      "filename_prefix": "AnimateDiff",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "272",
+        0
+      ],
+      "audio": [
+        "205",
+        2
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "272": {
+    "inputs": {
+      "model": "tiny-long",
+      "mode": 2,
+      "scale": true,
+      "tiled_vae": true,
+      "tiled_dit": true,
+      "unload_dit": 512,
+      "seed": 24,
+      "frames": [
+        "283",
+        0
+      ]
+    },
+    "class_type": "FlashVSRNode",
+    "_meta": {
+      "title": "FlashVSR Ultra-Fast"
+    }
+  },
+  "273": {
+    "inputs": {
+      "aspect_ratio": "original",
+      "proportional_width": 1,
+      "proportional_height": 1,
+      "fit": "crop",
+      "method": "lanczos",
+      "round_to_multiple": "8",
+      "scale_to_side": "longest",
+      "scale_to_length": [
+        "274",
+        0
+      ],
+      "background_color": "#000000",
+      "image": [
+        "205",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: ImageScaleByAspectRatio V2",
+    "_meta": {
+      "title": "LayerUtility: ImageScaleByAspectRatio V2"
+    }
+  },
+  "274": {
+    "inputs": {
+      "value": 960
+    },
+    "class_type": "ImpactInt",
+    "_meta": {
+      "title": "ImpactInt"
+    }
+  },
+  "276": {
+    "inputs": {
+      "width": [
+        "273",
+        3
+      ],
+      "height": [
+        "273",
+        4
+      ],
+      "upscale_method": "nearest-exact",
+      "keep_proportion": "stretch",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 2,
+      "device": "cpu",
+      "image": [
+        "291",
+        0
+      ]
+    },
+    "class_type": "ImageResizeKJv2",
+    "_meta": {
+      "title": "Resize Image v2"
+    }
+  },
+  "277": {
+    "inputs": {
+      "images": [
+        "276",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "278": {
+    "inputs": {
+      "video_info": [
+        "205",
+        3
+      ]
+    },
+    "class_type": "VHS_VideoInfo",
+    "_meta": {
+      "title": "Video Info 🎥🅥🅗🅢"
+    }
+  },
+  "279": {
+    "inputs": {
+      "text": "30.0",
+      "anything": [
+        "278",
+        0
+      ]
+    },
+    "class_type": "easy showAnything",
+    "_meta": {
+      "title": "Show Any"
+    }
+  },
+  "280": {
+    "inputs": {
+      "amount": [
+        "278",
+        6
+      ],
+      "image": [
+        "276",
+        0
+      ]
+    },
+    "class_type": "RepeatImageBatch",
+    "_meta": {
+      "title": "RepeatImageBatch"
+    }
+  },
+  "281": {
+    "inputs": {
+      "text": "300",
+      "anything": [
+        "278",
+        1
+      ]
+    },
+    "class_type": "easy showAnything",
+    "_meta": {
+      "title": "Show Any"
+    }
+  },
+  "282": {
+    "inputs": {
+      "checkpoint": "realisticVisionV60B1_v60B1VAE.safetensors",
+      "lora": "pcm_sd15_smallcfg_2step_converted.safetensors"
+    },
+    "class_type": "DiffuEraserLoader",
+    "_meta": {
+      "title": "DiffuEraserLoader"
+    }
+  },
+  "283": {
+    "inputs": {
+      "seed": 515151,
+      "num_inference_steps": 2,
+      "guidance_scale": 0,
+      "video_length": 10,
+      "mask_dilation_iter": 8,
+      "ref_stride": 10,
+      "neighbor_length": 10,
+      "subvideo_length": 50,
+      "video2mask": false,
+      "seg_repo": "briaai/RMBG-2.0",
+      "save_result_video": false,
+      "model": [
+        "282",
+        0
+      ],
+      "images": [
+        "273",
+        0
+      ],
+      "fps": [
+        "278",
+        0
+      ],
+      "video_mask": [
+        "280",
+        0
+      ]
+    },
+    "class_type": "DiffuEraserSampler",
+    "_meta": {
+      "title": "DiffuEraserSampler"
+    }
+  },
+  "285": {
+    "inputs": {
+      "direction": "right",
+      "match_image_size": true,
+      "image1": [
+        "273",
+        0
+      ],
+      "image2": [
+        "283",
+        0
+      ]
+    },
+    "class_type": "ImageConcanate",
+    "_meta": {
+      "title": "Image Concatenate"
+    }
+  },
+  "288": {
+    "inputs": {
+      "images": [
+        "319",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "291": {
+    "inputs": {
+      "any_02": [
+        "242",
+        0
+      ]
+    },
+    "class_type": "Any Switch (rgthree)",
+    "_meta": {
+      "title": "Any Switch (rgthree)"
+    }
+  },
+  "319": {
+    "inputs": {
+      "batch_index": 0,
+      "length": 1,
+      "image": [
+        "205",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "ImageFromBatch"
+    }
+  }
+}
