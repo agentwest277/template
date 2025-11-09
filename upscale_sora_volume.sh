@@ -132,7 +132,7 @@ ensure_base_tools() {
 provisioning_get_pip_packages() {
   "$PY" -m pip install --upgrade pip || true
 
-  # Библиотеки, на которые ругались ноды (DiffuEraser, LayerStyle, Impact-Pack, VHS)
+  # Библиотеки для узлов (VHS/LayerStyle/SAM2 и т.п.)
   pip_install_if_missing \
     "diffusers" \
     "accelerate" \
@@ -149,11 +149,9 @@ provisioning_get_pip_packages() {
     "soundfile" \
     "segment_anything:segment-anything"
 
-  # OpenCV contrib — нужен guidedFilter (cv2.ximgproc) для LayerStyle
   "$PIP" uninstall -y opencv-python opencv-python-headless >/dev/null 2>&1 || true
   pip_install_if_missing "cv2:opencv-contrib-python-headless"
 
-  # Лёгкий прогрев импорта
   "$PY" - <<'PY'
 import importlib
 for m in ("diffusers","imageio","imageio_ffmpeg","scipy","skimage","piexif","blend_modes","segment_anything","cv2"):
@@ -186,7 +184,7 @@ provisioning_get_nodes() {
     [[ -f "$requirements" ]] && pip_requirements_minimal "$requirements" || true
   done
 
-  # SAM2: правильная нода — ComfyUI-SAM2. Чужая папка sam2 без __init__.py ломает импорт.
+  # SAM2: чиним «левую» папку sam2 без __init__.py
   local sam2_dir="${COMFYUI_DIR}/custom_nodes/sam2"
   local comfy_sam2_dir="${COMFYUI_DIR}/custom_nodes/ComfyUI-SAM2"
 
@@ -209,8 +207,7 @@ provisioning_get_nodes() {
 provisioning_get_files() {
   # $1 = target dir, остальные — URL
   if [[ $# -lt 2 ]]; then return 0; fi
-  local dir="$1"
-  shift
+  local dir="$1"; shift
   local arr=("$@")
   mkdir -p "$dir"
   printf "Downloading %s file(s) to %s...\n" "${#arr[@]}" "$dir"
@@ -222,8 +219,7 @@ provisioning_get_files() {
 
 provisioning_get_workflows() {
   if [[ $# -lt 2 ]]; then return 0; fi
-  local dir="$1"
-  shift
+  local dir="$1"; shift
   local arr=("$@")
   mkdir -p "$dir"
   printf "Downloading %s workflow(s) to %s...\n" "${#arr[@]}" "$dir"
@@ -291,7 +287,127 @@ provisioning_start() {
   provisioning_print_end
 }
 
+# ── АВТОЗАПУСК ГЕНЕРАЦИИ ─────────────────────────────────────────────────────
+
+install_generate_autostart() {
+  mkdir -p /usr/local/bin "$DATA/output"
+
+  cat >/usr/local/bin/generate-watch.sh <<'SH'
+#!/bin/bash
+set -euo pipefail
+
+DATA="${DATA:-/data}"
+WORKSPACE="${WORKSPACE:-/workspace}"
+PY="${PY:-/venv/main/bin/python}"
+GEN_SCRIPT="${GEN_SCRIPT:-/data/script/my_generate.py}"
+WORKFLOW="${WORKFLOW:-/data/script/workflow.json}"
+OUTDIR="${OUTDIR:-/data/output}"
+LOG="${LOG:-/data/output/watch.log}"
+
+touch "$LOG"
+
+# Ждём локальный ComfyUI (как в generate.py)
+wait_comfy() {
+  local url="${COMFY_URL:-http://127.0.0.1:8188}/system_stats"
+  local end=$((SECONDS+600))
+  while (( SECONDS < end )); do
+    if curl -sSf --max-time 3 "$url" >/dev/null; then
+      echo "[watch] ComfyUI is up" | tee -a "$LOG"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "[watch][ERR] ComfyUI is not up in time" | tee -a "$LOG"
+  return 1
+}
+
+process_one() {
+  local f="$1"
+  local base="${f##*/}"
+  local lock="$f.lock"
+  local done="$f.done"
+
+  # уже в работе или завершён
+  [[ -e "$lock" || -e "$done" ]] && return 0
+
+  # пропускаем пустые/неполные
+  if [[ ! -s "$f" ]]; then
+    return 0
+  fi
+
+  echo "[watch] start: $f" | tee -a "$LOG"
+  : > "$lock"
+  if "$PY" "$GEN_SCRIPT" --video "$f" --workflow-path "$WORKFLOW" --out "$OUTDIR" >>"$LOG" 2>&1; then
+    echo "[watch] done: $f" | tee -a "$LOG"
+    : > "$done"
+  else
+    echo "[watch][ERR] failed: $f" | tee -a "$LOG"
+    rm -f "$lock"
+    return 1
+  fi
+  rm -f "$lock"
+  return 0
+}
+
+main_loop() {
+  wait_comfy || true
+  mkdir -p "$OUTDIR"
+  while true; do
+    shopt -s nullglob
+    # Берём самый старый ещё не обработанный mp4
+    mapfile -t files < <(find "$WORKSPACE" -maxdepth 1 -type f -name '*.mp4' -printf '%T@ %p\n' 2>/dev/null | sort -n | awk '{print $2}')
+    for f in "${files[@]}"; do
+      process_one "$f" || true
+    done
+    sleep 5
+  done
+}
+
+main_loop
+SH
+  chmod +x /usr/local/bin/generate-watch.sh
+
+  # systemd unit
+  cat >/etc/systemd/system/generate-watch.service <<'UNIT'
+[Unit]
+Description=Watch /workspace for *.mp4 and run my_generate.py
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=DATA=/data
+Environment=WORKSPACE=/workspace
+Environment=PY=/venv/main/bin/python
+Environment=GEN_SCRIPT=/data/script/my_generate.py
+Environment=WORKFLOW=/data/script/workflow.json
+Environment=OUTDIR=/data/output
+Environment=COMFY_URL=http://127.0.0.1:8188
+ExecStart=/usr/local/bin/generate-watch.sh
+Restart=always
+RestartSec=3
+Nice=5
+# Логи в journald + /data/output/watch.log
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+  systemctl daemon-reload || true
+  systemctl enable generate-watch.service || true
+  systemctl restart generate-watch.service || true
+
+  echo "Autostart installed: systemctl status generate-watch.service"
+}
+
+# ── ЗАПУСК ────────────────────────────────────────────────────────────────────
+
 # Позволяем отключить провижининг созданием файла /.noprovisioning
 if [[ ! -f /.noprovisioning ]]; then
   provisioning_start
 fi
+
+# Ставим автозапуск генерации (всегда)
+install_generate_autostart
