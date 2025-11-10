@@ -1,9 +1,9 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 ##############################################
-#        ComfyUI provisioning for Vast       #
-#     Volume mounted at /data (immutable)    #
+#      ComfyUI provisioning for Vast         #
+#    Volume mounted at /data (immutable)     #
 ##############################################
 
 # ---- Базовые пути/переменные ----
@@ -34,7 +34,7 @@ export MPLCONFIGDIR="$DATA/.cache/matplotlib"
 mkdir -p "$HF_HOME" "$TRANSFORMERS_CACHE" "$DIFFUSERS_CACHE" "$PIP_CACHE_DIR" "$XDG_CACHE_HOME" "$MPLCONFIGDIR"
 
 # Готовим каталоги
-mkdir -p "$COMFYUI_DIR"/{models,custom_nodes,input,output} "$WORKSPACE"
+mkdir -p "$COMFYUI_DIR"/{models,custom_nodes,input,output} "$WORKSPACE" "$DATA/output" "$DATA/script"
 
 # Если /workspace/ComfyUI — реальная папка, аккуратно перенесём данные на том
 if [[ -d "$WORKSPACE/ComfyUI" && ! -L "$WORKSPACE/ComfyUI" ]]; then
@@ -46,10 +46,9 @@ fi
 ln -sfn "$COMFYUI_DIR" "$WORKSPACE/ComfyUI"
 ln -sfn "$COMFYUI_DIR" "$HOME/ComfyUI" 2>/dev/null || true
 
-# ---- Настройки установки ----
+# ---- Настройки установки (оставляем как было; наполняй по необходимости) ----
 AUTO_UPDATE="${AUTO_UPDATE:-true}"
 
-# Заполняй по желанию (модели не скачаются повторно, если уже лежат на volume):
 NODES=()
 INPUT_IMAGES=()
 TEXT_ENCODER_MODELS=()
@@ -62,7 +61,7 @@ VAE_MODELS=()
 ESRGAN_MODELS=()
 CONTROLNET_MODELS=()
 
-# ── ХЕЛПЕРЫ ───────────────────────────────────────────────────────────────────
+# ── ХЕЛПЕРЫ УСТАНОВКИ ────────────────────────────────────────────────────────
 
 apt_install_if_missing() {
   command -v apt-get >/dev/null 2>&1 || { echo "apt-get недоступен"; return 0; }
@@ -111,8 +110,6 @@ pip_requirements_minimal() {
   "$PIP" install --no-cache-dir -r "$reqfile" || true
 }
 
-# ── ЛОГИКА УСТАНОВКИ ──────────────────────────────────────────────────────────
-
 provisioning_print_header() {
   printf "\n##############################################\n#          Provisioning container            #\n##############################################\n\n"
 }
@@ -149,9 +146,11 @@ provisioning_get_pip_packages() {
     "soundfile" \
     "segment_anything:segment-anything"
 
+  # OpenCV contrib — нужен guidedFilter (cv2.ximgproc) для LayerStyle
   "$PIP" uninstall -y opencv-python opencv-python-headless >/dev/null 2>&1 || true
   pip_install_if_missing "cv2:opencv-contrib-python-headless"
 
+  # Лёгкий прогрев импорта
   "$PY" - <<'PY'
 import importlib
 for m in ("diffusers","imageio","imageio_ffmpeg","scipy","skimage","piexif","blend_modes","segment_anything","cv2"):
@@ -287,127 +286,115 @@ provisioning_start() {
   provisioning_print_end
 }
 
-# ── АВТОЗАПУСК ГЕНЕРАЦИИ ─────────────────────────────────────────────────────
+# ── ЗАПУСК COMFY + WATCHER (без systemd) ─────────────────────────────────────
 
-install_generate_autostart() {
-  mkdir -p /usr/local/bin "$DATA/output"
+is_port_free() { ! ss -tln 2>/dev/null | awk '{print $4}' | grep -q ":$1$"; }
 
-  cat >/usr/local/bin/generate-watch.sh <<'SH'
-#!/bin/bash
-set -euo pipefail
+pick_comfy_port() {
+  [[ -n "${COMFY_PORT:-}" ]] && { echo "$COMFY_PORT"; return; }
+  if is_port_free 18188; then echo 18188; return; fi
+  if is_port_free 8188;  then echo 8188;  return; fi
+  # если оба заняты — найдём свободный от 20000
+  for p in $(seq 20000 20100); do is_port_free "$p" && { echo "$p"; return; }; done
+  echo 18188
+}
 
-DATA="${DATA:-/data}"
-WORKSPACE="${WORKSPACE:-/workspace}"
-PY="${PY:-/venv/main/bin/python}"
-GEN_SCRIPT="${GEN_SCRIPT:-/data/script/my_generate.py}"
-WORKFLOW="${WORKFLOW:-/data/script/workflow.json}"
-OUTDIR="${OUTDIR:-/data/output}"
-LOG="${LOG:-/data/output/watch.log}"
-
-touch "$LOG"
-
-# Ждём локальный ComfyUI (как в generate.py)
-wait_comfy() {
-  local url="${COMFY_URL:-http://127.0.0.1:8188}/system_stats"
-  local end=$((SECONDS+600))
+wait_http_up() {
+  local url="$1" ; local end=$((SECONDS+600))
   while (( SECONDS < end )); do
-    if curl -sSf --max-time 3 "$url" >/dev/null; then
-      echo "[watch] ComfyUI is up" | tee -a "$LOG"
-      return 0
-    fi
+    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "$url" || echo 000)
+    [[ "$code" != "000" && "$code" -lt 500 ]] && return 0
     sleep 2
   done
-  echo "[watch][ERR] ComfyUI is not up in time" | tee -a "$LOG"
   return 1
 }
 
-process_one() {
-  local f="$1"
-  local base="${f##*/}"
-  local lock="$f.lock"
-  local done="$f.done"
+start_comfy() {
+  local port
+  port=$(pick_comfy_port)
+  export COMFY_URL="http://127.0.0.1:${port}"
+  echo "[start] COMFY_URL=$COMFY_URL"
 
-  # уже в работе или завершён
-  [[ -e "$lock" || -e "$done" ]] && return 0
-
-  # пропускаем пустые/неполные
-  if [[ ! -s "$f" ]]; then
+  # если уже слушает — не стартуем заново
+  if wait_http_up "${COMFY_URL%/}/system_stats"; then
+    echo "[start] ComfyUI уже запущен на $COMFY_URL"
     return 0
   fi
 
-  echo "[watch] start: $f" | tee -a "$LOG"
-  : > "$lock"
-  if "$PY" "$GEN_SCRIPT" --video "$f" --workflow-path "$WORKFLOW" --out "$OUTDIR" >>"$LOG" 2>&1; then
-    echo "[watch] done: $f" | tee -a "$LOG"
-    : > "$done"
-  else
-    echo "[watch][ERR] failed: $f" | tee -a "$LOG"
-    rm -f "$lock"
+  # ищем entrypoint
+  local entry="$COMFYUI_DIR/main.py"
+  if [[ ! -f "$entry" && -f "$WORKSPACE/ComfyUI/main.py" ]]; then
+    entry="$WORKSPACE/ComfyUI/main.py"
+  fi
+  if [[ ! -f "$entry" ]]; then
+    echo "[ERR] Не найден ComfyUI main.py в $COMFYUI_DIR или $WORKSPACE/ComfyUI"
     return 1
   fi
-  rm -f "$lock"
-  return 0
+
+  # лог
+  local logf="$DATA/output/comfy.nohup.log"
+  touch "$logf"
+
+  # стартуем
+  echo "[start] Запуск ComfyUI на 0.0.0.0:${port} (лог: $logf)"
+  nohup "$PY " -u "$entry" --listen 0.0.0.0 --port "$port" >>"$logf" 2>&1 &
+
+  # ждём доступности
+  if wait_http_up "${COMFY_URL%/}/system_stats"; then
+    echo "[start] ComfyUI доступен: $COMFY_URL"
+    return 0
+  else
+    echo "[ERR] ComfyUI не поднялся вовремя"
+    return 1
+  fi
 }
 
-main_loop() {
-  wait_comfy || true
-  mkdir -p "$OUTDIR"
-  while true; do
-    shopt -s nullglob
-    # Берём самый старый ещё не обработанный mp4
-    mapfile -t files < <(find "$WORKSPACE" -maxdepth 1 -type f -name '*.mp4' -printf '%T@ %p\n' 2>/dev/null | sort -n | awk '{print $2}')
-    for f in "${files[@]}"; do
-      process_one "$f" || true
-    done
-    sleep 5
-  done
+start_watcher_if_exists() {
+  local watcher="$DATA/script/generate-watch.sh"
+  if [[ ! -x "$watcher" ]]; then
+    echo "[watch] $watcher не найден (или не исполняем). Пропуск автозапуска."
+    echo "[hint] Скопируй свой watcher в /data/script/generate-watch.sh и сделай chmod +x"
+    return 0
+  fi
+
+  # уже запущен?
+  if pgrep -f "$watcher" >/dev/null 2>&1; then
+    echo "[watch] watcher уже запущен"
+    return 0
+  fi
+
+  echo "[watch] стартую watcher…"
+  # передаём COMFY_URL в окружение
+  COMFY_URL="$COMFY_URL" nohup "$watcher" >>"$DATA/output/watch.nohup.log" 2>&1 &
+  echo "[watch] tail -f $DATA/output/watch.nohup.log"
 }
 
-main_loop
-SH
-  chmod +x /usr/local/bin/generate-watch.sh
+install_cron_autostart() {
+  # автозапуск watcher при перезапуске контейнера (если cron доступен)
+  command -v crontab >/dev/null 2>&1 || return 0
+  local watcher="$DATA/script/generate-watch.sh"
+  [[ -x "$watcher" ]] || return 0
 
-  # systemd unit
-  cat >/etc/systemd/system/generate-watch.service <<'UNIT'
-[Unit]
-Description=Watch /workspace for *.mp4 and run my_generate.py
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-Environment=DATA=/data
-Environment=WORKSPACE=/workspace
-Environment=PY=/venv/main/bin/python
-Environment=GEN_SCRIPT=/data/script/my_generate.py
-Environment=WORKFLOW=/data/script/workflow.json
-Environment=OUTDIR=/data/output
-Environment=COMFY_URL=http://127.0.0.1:8188
-ExecStart=/usr/local/bin/generate-watch.sh
-Restart=always
-RestartSec=3
-Nice=5
-# Логи в journald + /data/output/watch.log
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-  systemctl daemon-reload || true
-  systemctl enable generate-watch.service || true
-  systemctl restart generate-watch.service || true
-
-  echo "Autostart installed: systemctl status generate-watch.service"
+  # добавим @reboot, если нет
+  local line="@reboot COMFY_URL=$COMFY_URL $watcher >>$DATA/output/watch.nohup.log 2>&1"
+  (crontab -l 2>/dev/null | grep -Fv "$watcher" || true; echo "$line") | crontab -
+  echo "[cron] @reboot автозапуск watcher установлен"
 }
 
 # ── ЗАПУСК ────────────────────────────────────────────────────────────────────
 
-# Позволяем отключить провижининг созданием файла /.noprovisioning
+# 1) (опционально) провижининг (можно отключить /.noprovisioning)
 if [[ ! -f /.noprovisioning ]]; then
   provisioning_start
 fi
 
-# Ставим автозапуск генерации (всегда)
-install_generate_autostart
+# 2) стартуем Comfy
+start_comfy || true
+
+# 3) автозапуск вотчера, если он лежит в /data/script/generate-watch.sh
+start_watcher_if_exists || true
+
+# 4) сделать автозапуск вотчера через cron (@reboot), если cron есть
+install_cron_autostart || true
+
+echo "[done] on-start завершён. Логи: $DATA/output/comfy.nohup.log и $DATA/output/watch.nohup.log"
