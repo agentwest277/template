@@ -50,9 +50,8 @@ UNET_MODELS=(
 
 LORA_MODELS=(
     "https://huggingface.co/Alex583940/lora_iphone_qwen/resolve/main/Qwen-iPhone-V1.1.safetensors?download=true"
-	"https://huggingface.co/Alex583940/qwen_girl/resolve/main/qwen_MCNL_v1.0.safetensors"
-	"https://huggingface.co/Alex583940/qwen_girl/resolve/main/Qwen-MysticXXX-v1.safetensors?download=true"
-	"https://huggingface.co/Alex583940/qwen_girl/resolve/main/qwen_snofs.safetensors?download=true"
+	"https://huggingface.co/Alex583940/qwen_girl/resolve/main/qwen-edit-skin_1.1_000002500.safetensors?download=true"
+	"https://huggingface.co/Alex583940/qwen_girl/resolve/main/qwen-image_nsfw_adv_v1.0.safetensors?download=true"
 )
 
 VAE_MODELS=(
